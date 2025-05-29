@@ -19,6 +19,7 @@ client = None
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
+# For connecting to OpenRGB server and application 
 def find_openrgb_executable():
     """Find OpenRGB executable in common locations"""
     possible_paths = [
