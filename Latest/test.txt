@@ -1,0 +1,35 @@
+import customtkinter as ctk
+
+# Set appearance mode
+ctk.set_appearance_mode("dark")  # Options: "System" | "Dark" | "Light"
+ctk.set_default_color_theme("blue")  # Other themes: "green", "dark-blue"
+
+app = ctk.CTk()  # Create main window
+app.geometry("400x300")
+app.title("RGB Controller")
+
+def update_color():
+    r, g, b = red_slider.get(), green_slider.get(), blue_slider.get()
+    hex_color = f'#{int(r):02x}{int(g):02x}{int(b):02x}'
+    preview.configure(bg_color=hex_color)
+    print(f"Set color to: {hex_color}")
+
+# Sliders
+red_slider = ctk.CTkSlider(app, from_=0, to=255, command=lambda x: update_color())
+green_slider = ctk.CTkSlider(app, from_=0, to=255, command=lambda x: update_color())
+blue_slider = ctk.CTkSlider(app, from_=0, to=255, command=lambda x: update_color())
+
+red_slider.set(128)
+green_slider.set(128)
+blue_slider.set(128)
+
+red_slider.pack(pady=10)
+green_slider.pack(pady=10)
+blue_slider.pack(pady=10)
+
+# Color preview
+preview = ctk.CTkLabel(app, text="Preview", width=200, height=50)
+preview.pack(pady=20)
+
+# Start
+app.mainloop()
