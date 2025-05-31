@@ -1,54 +1,41 @@
 import customtkinter as ctk
-from tkinter import messagebox
+import tkinter as tk
+from tkinter import colorchooser
+import colorsys
+import math
 from openrgb.utils import RGBColor
-import tkinter.colorchooser as colorchooser
-# Set global appearance
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
+import threading
+import time
 
 class ColorControlWindow(ctk.CTkToplevel):
     def __init__(self, parent, client, device):
         super().__init__(parent)
         
-        # Store references
         self.parent = parent
         self.client = client
         self.device = device
         self.selected_zone = None
-        self.zone_buttons = {}  # Store zone buttons for highlighting
-        self.zone_colors = {}   # Store zone colors
+        self.current_color = (255, 0, 0)  # Default red
+        self.update_thread = None
+        self.updating = False
         
         # Window setup
         self.title(f"Color Control - {device.name}")
+        self.geometry("800x700")
+        self.minsize(600, 500)
         
-        # Desired window size
-        window_width = 1600
-        window_height = 900
-
-        # Get screen width and height
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-
-        # Calculate position x, y to center the window
-        x = int((screen_width / 2) - (window_width / 2))
-        y = int((screen_height / 2) - (window_height / 2))
-
-        # Set geometry with position
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        self.minsize(800, 600)
-        
-        # Make window modal
-        self.transient(parent)
-        self.grab_set()
+        # Make window stay on top initially
+        self.lift()
+        self.focus_force()
         
         # Create UI
         self.create_ui()
         
-        # Bind resize event
-        self.bind("<Configure>", self.on_window_resize)
+        # Load zones
+        self.load_zones()
     
     def create_ui(self):
-        """Create the user interface"""
+        """Create the color control interface"""
         # Main container
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -56,14 +43,14 @@ class ColorControlWindow(ctk.CTkToplevel):
         # Title
         self.title_label = ctk.CTkLabel(
             self.main_frame,
-            text=f"Color Control for {self.device.name}",
-            font=("Arial", 20, "bold")
+            text=f"Color Control - {self.device.name}",
+            font=("Arial", 24, "bold")
         )
         self.title_label.pack(pady=(10, 20))
         
         # Zone selection frame
         self.zone_frame = ctk.CTkFrame(self.main_frame)
-        self.zone_frame.pack(fill="x", padx=20, pady=(0, 20))
+        self.zone_frame.pack(fill="x", padx=10, pady=(0, 20))
         
         self.zone_label = ctk.CTkLabel(
             self.zone_frame,
@@ -72,310 +59,335 @@ class ColorControlWindow(ctk.CTkToplevel):
         )
         self.zone_label.pack(pady=(10, 5))
         
-        # Zone buttons container with scrollable frame
-        self.zone_scroll_frame = ctk.CTkScrollableFrame(self.zone_frame)
-        self.zone_scroll_frame.pack(fill="x", padx=10, pady=(0, 10))
+        # Zone buttons container
+        self.zone_buttons_frame = ctk.CTkScrollableFrame(self.zone_frame, height=120)
+        self.zone_buttons_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # Load zones
-        self.load_zones()
-        
-        # Color control section
+        # Color control frame
         self.color_frame = ctk.CTkFrame(self.main_frame)
-        self.color_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.color_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
-        self.color_label = ctk.CTkLabel(
-            self.color_frame,
-            text="Color Picker",
-            font=("Arial", 16, "bold")
-        )
-        self.color_label.pack(pady=(10, 5))
+        # Color preview
+        self.preview_frame = ctk.CTkFrame(self.color_frame)
+        self.preview_frame.pack(fill="x", padx=20, pady=(20, 10))
         
-        # Color picker button
-        self.color_picker_btn = ctk.CTkButton(
-            self.color_frame,
-            text="Pick Color",
-            command=self.pick_color,
-            width=200,
-            height=40
+        self.preview_label = ctk.CTkLabel(
+            self.preview_frame,
+            text="Current Color:",
+            font=("Arial", 14, "bold")
         )
-        self.color_picker_btn.pack(pady=10)
+        self.preview_label.pack(pady=(10, 5))
+        
+        self.color_preview = ctk.CTkFrame(
+            self.preview_frame,
+            height=60,
+            fg_color=self.rgb_to_hex(self.current_color)
+        )
+        self.color_preview.pack(fill="x", padx=20, pady=(0, 10))
         
         # RGB sliders frame
         self.sliders_frame = ctk.CTkFrame(self.color_frame)
         self.sliders_frame.pack(fill="x", padx=20, pady=10)
         
+        # RGB sliders
+        self.create_rgb_sliders()
+        
+        # RGB entry frame
+        self.entry_frame = ctk.CTkFrame(self.color_frame)
+        self.entry_frame.pack(fill="x", padx=20, pady=10)
+        
+        self.create_rgb_entries()
+        
+        # Color picker button
+        self.picker_btn = ctk.CTkButton(
+            self.color_frame,
+            text="Open System Color Picker",
+            command=self.open_color_picker,
+            width=200,
+            height=40
+        )
+        self.picker_btn.pack(pady=20)
+        
+        # Quick colors frame
+        self.quick_colors_frame = ctk.CTkFrame(self.color_frame)
+        self.quick_colors_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        self.create_quick_colors()
+    
+    def create_rgb_sliders(self):
+        """Create RGB sliders"""
+        slider_frame = ctk.CTkFrame(self.sliders_frame)
+        slider_frame.pack(fill="x", padx=10, pady=10)
+        
         # Red slider
-        self.red_frame = ctk.CTkFrame(self.sliders_frame)
-        self.red_frame.pack(fill="x", padx=20, pady=(10, 0))
-        
-        self.red_label = ctk.CTkLabel(self.red_frame, text="Red:")
-        self.red_label.pack(side="left", padx=(0, 10))
-        
-        self.red_value_label = ctk.CTkLabel(self.red_frame, text="255")
-        self.red_value_label.pack(side="right")
+        self.red_label = ctk.CTkLabel(slider_frame, text="Red: 255", width=80)
+        self.red_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
         
         self.red_slider = ctk.CTkSlider(
-            self.sliders_frame,
+            slider_frame,
             from_=0,
             to=255,
             number_of_steps=255,
-            command=self.update_red_value
+            command=self.on_red_change
         )
-        self.red_slider.pack(fill="x", padx=20, pady=(0, 10))
+        self.red_slider.set(255)
+        self.red_slider.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
         
         # Green slider
-        self.green_frame = ctk.CTkFrame(self.sliders_frame)
-        self.green_frame.pack(fill="x", padx=20, pady=(10, 0))
-        
-        self.green_label = ctk.CTkLabel(self.green_frame, text="Green:")
-        self.green_label.pack(side="left", padx=(0, 10))
-        
-        self.green_value_label = ctk.CTkLabel(self.green_frame, text="255")
-        self.green_value_label.pack(side="right")
+        self.green_label = ctk.CTkLabel(slider_frame, text="Green: 0", width=80)
+        self.green_label.grid(row=1, column=0, padx=10, pady=5, sticky="w")
         
         self.green_slider = ctk.CTkSlider(
-            self.sliders_frame,
+            slider_frame,
             from_=0,
             to=255,
             number_of_steps=255,
-            command=self.update_green_value
+            command=self.on_green_change
         )
-        self.green_slider.pack(fill="x", padx=20, pady=(0, 10))
+        self.green_slider.set(0)
+        self.green_slider.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
         
         # Blue slider
-        self.blue_frame = ctk.CTkFrame(self.sliders_frame)
-        self.blue_frame.pack(fill="x", padx=20, pady=(10, 0))
-        
-        self.blue_label = ctk.CTkLabel(self.blue_frame, text="Blue:")
-        self.blue_label.pack(side="left", padx=(0, 10))
-        
-        self.blue_value_label = ctk.CTkLabel(self.blue_frame, text="255")
-        self.blue_value_label.pack(side="right")
+        self.blue_label = ctk.CTkLabel(slider_frame, text="Blue: 0", width=80)
+        self.blue_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
         
         self.blue_slider = ctk.CTkSlider(
-            self.sliders_frame,
+            slider_frame,
             from_=0,
             to=255,
             number_of_steps=255,
-            command=self.update_blue_value
+            command=self.on_blue_change
         )
-        self.blue_slider.pack(fill="x", padx=20, pady=(0, 10))
+        self.blue_slider.set(0)
+        self.blue_slider.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
         
-        # Color preview
-        self.preview_frame = ctk.CTkFrame(self.color_frame, width=100, height=100)
-        self.preview_frame.pack(pady=20)
-        
-        # Initialize sliders to white
-        self.red_slider.set(255)
-        self.green_slider.set(255)
-        self.blue_slider.set(255)
-        
-        # Update preview
-        self.update_color()
+        # Configure grid weights
+        slider_frame.grid_columnconfigure(1, weight=1)
     
-    def on_window_resize(self, event):
-        """Handle window resize events"""
-        if event.widget == self:
-            # Update button layouts
-            self.update_button_layout()
+    def create_rgb_entries(self):
+        """Create RGB entry boxes"""
+        entry_container = ctk.CTkFrame(self.entry_frame)
+        entry_container.pack(pady=10)
+        
+        # RGB entries
+        ctk.CTkLabel(entry_container, text="RGB Values:", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=(0, 10)
+        )
+        
+        ctk.CTkLabel(entry_container, text="R:").grid(row=1, column=0, padx=5)
+        self.red_entry = ctk.CTkEntry(entry_container, width=60)
+        self.red_entry.grid(row=1, column=1, padx=5)
+        self.red_entry.insert(0, "255")
+        self.red_entry.bind("<KeyRelease>", self.on_entry_change)
+        
+        ctk.CTkLabel(entry_container, text="G:").grid(row=1, column=2, padx=5)
+        self.green_entry = ctk.CTkEntry(entry_container, width=60)
+        self.green_entry.grid(row=1, column=3, padx=5)
+        self.green_entry.insert(0, "0")
+        self.green_entry.bind("<KeyRelease>", self.on_entry_change)
+        
+        ctk.CTkLabel(entry_container, text="B:").grid(row=1, column=4, padx=5)
+        self.blue_entry = ctk.CTkEntry(entry_container, width=60)
+        self.blue_entry.grid(row=1, column=5, padx=5)
+        self.blue_entry.insert(0, "0")
+        self.blue_entry.bind("<KeyRelease>", self.on_entry_change)
     
-    def update_button_layout(self):
-        """Update button layout based on window size"""
-        try:
-            # Get current window width
-            window_width = self.winfo_width()
-            
-            # Calculate optimal button width and columns
-            min_button_width = 250
-            max_button_width = 400
-            button_padding = 10
-            
-            # Calculate how many columns can fit
-            available_width = window_width - 100  # Account for padding
-            cols = max(1, available_width // (min_button_width + button_padding))
-            
-            # Calculate button width
-            button_width = min(max_button_width, 
-                             (available_width - (cols * button_padding)) // cols)
-            
-            # Update zone buttons layout
-            for i, (zone, btn) in enumerate(self.zone_buttons.items()):
-                btn.configure(width=button_width)
-                btn.grid(row=i//cols, column=i%cols, padx=5, pady=5, sticky="ew")
-            
-            # Configure column weights
-            for col in range(cols):
-                self.zone_scroll_frame.grid_columnconfigure(col, weight=1)
-                
-        except Exception as e:
-            print(f"Error updating button layout: {e}")
+    def create_quick_colors(self):
+        """Create quick color selection buttons"""
+        ctk.CTkLabel(
+            self.quick_colors_frame,
+            text="Quick Colors:",
+            font=("Arial", 14, "bold")
+        ).pack(pady=(10, 5))
+        
+        colors_container = ctk.CTkFrame(self.quick_colors_frame)
+        colors_container.pack(pady=(0, 10))
+        
+        # Quick color options
+        quick_colors = [
+            ("Red", (255, 0, 0)),
+            ("Green", (0, 255, 0)),
+            ("Blue", (0, 0, 255)),
+            ("Yellow", (255, 255, 0)),
+            ("Cyan", (0, 255, 255)),
+            ("Magenta", (255, 0, 255)),
+            ("White", (255, 255, 255)),
+            ("Off", (0, 0, 0))
+        ]
+        
+        for i, (name, color) in enumerate(quick_colors):
+            btn = ctk.CTkButton(
+                colors_container,
+                text=name,
+                command=lambda c=color: self.set_color(c),
+                width=80,
+                height=30,
+                fg_color=self.rgb_to_hex(color) if color != (0, 0, 0) else "#404040"
+            )
+            btn.grid(row=i//4, column=i%4, padx=5, pady=5)
     
     def load_zones(self):
-        """Load and display zones for the selected device"""
+        """Load zones as buttons"""
         try:
             # Clear existing zone buttons
-            for widget in self.zone_scroll_frame.winfo_children():
+            for widget in self.zone_buttons_frame.winfo_children():
                 widget.destroy()
-            self.zone_buttons.clear()
-            self.zone_colors.clear()  # Clear stored colors
             
-            # Get zones
             zones = self.device.zones
             
             if not zones:
                 no_zone_label = ctk.CTkLabel(
-                    self.zone_scroll_frame,
-                    text="No zones found for this device"
+                    self.zone_buttons_frame,
+                    text="No zones found"
                 )
                 no_zone_label.pack(pady=10)
                 return
             
             # Create zone buttons
             for i, zone in enumerate(zones):
-                zone_info = f"{zone.name}\n({len(zone.leds)} LEDs)"
                 btn = ctk.CTkButton(
-                    self.zone_scroll_frame,
-                    text=zone_info,
+                    self.zone_buttons_frame,
+                    text=f"{zone.name} ({len(zone.leds)} LEDs)",
                     command=lambda z=zone: self.select_zone(z),
-                    width=250,
-                    height=60
+                    width=200,
+                    height=35
                 )
-                btn.grid(row=0, column=i, padx=10, pady=10, sticky="ew")
-                self.zone_buttons[zone] = btn
+                btn.grid(row=i//3, column=i%3, padx=5, pady=5, sticky="ew")
+            
+            # Configure grid weights
+            for col in range(3):
+                self.zone_buttons_frame.grid_columnconfigure(col, weight=1)
                 
-                # Get and store initial color for each zone
-                try:
-                    if zone.leds:
-                        current_color = zone.leds[0].colors[0]
-                        self.zone_colors[zone] = (current_color.red, current_color.green, current_color.blue)
-                except Exception as e:
-                    print(f"Error getting initial color for zone {zone.name}: {e}")
-                    self.zone_colors[zone] = (255, 255, 255)  # Default to white
-            
-            print(f"Loaded {len(zones)} zones for device: {self.device.name}")
-            
-            # Update button layout
-            self.after(100, self.update_button_layout)
-            
         except Exception as e:
             print(f"Error loading zones: {e}")
-            messagebox.showerror("Error", f"Failed to load zones: {str(e)}")
     
     def select_zone(self, zone):
         """Select a zone for color control"""
-        # Reset previous selection
-        if self.selected_zone and self.selected_zone in self.zone_buttons:
-            self.zone_buttons[self.selected_zone].configure(
-                fg_color=["#3B8ED0", "#1F6AA5"],  # Default color
-                hover_color=["#36719F", "#144870"]  # Default hover color
-            )
-        
-        # Update selection
         self.selected_zone = zone
-        self.title_label.configure(
-            text=f"Color Control for {self.device.name} - {zone.name}"
-        )
-        
-        # Highlight selected button
-        if zone in self.zone_buttons:
-            self.zone_buttons[zone].configure(
-                fg_color="red",
-                hover_color="darkred"
-            )
-        
-        # Get or set zone color
-        if zone in self.zone_colors:
-            # Use stored color if available
-            r, g, b = self.zone_colors[zone]
-        else:
-            try:
-                # Get the first LED's color as reference (assuming all LEDs in zone have same color)
-                if zone.leds:
-                    current_color = zone.leds[0].colors[0]  # Get first color of first LED
-                    r, g, b = current_color.red, current_color.green, current_color.blue
-                else:
-                    r, g, b = 255, 255, 255  # Default to white if no LEDs
-            except Exception as e:
-                print(f"Error getting zone color: {e}")
-                r, g, b = 255, 255, 255  # Default to white if error
-        
-        # Update sliders and value labels
-        self.red_slider.set(r)
-        self.green_slider.set(g)
-        self.blue_slider.set(b)
-        self.red_value_label.configure(text=str(r))
-        self.green_value_label.configure(text=str(g))
-        self.blue_value_label.configure(text=str(b))
-        
-        # Store the color if not already stored
-        if zone not in self.zone_colors:
-            self.zone_colors[zone] = (r, g, b)
-        
+        print(f"Selected zone: {zone.name}")
+    
+    def rgb_to_hex(self, rgb):
+        """Convert RGB tuple to hex color"""
+        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    
+    def update_color_display(self):
+        """Update the color preview and controls"""
         # Update preview
-        self.update_color()
+        self.color_preview.configure(fg_color=self.rgb_to_hex(self.current_color))
+        
+        # Update labels
+        self.red_label.configure(text=f"Red: {int(self.current_color[0])}")
+        self.green_label.configure(text=f"Green: {int(self.current_color[1])}")
+        self.blue_label.configure(text=f"Blue: {int(self.current_color[2])}")
+        
+        # Update entries
+        self.red_entry.delete(0, "end")
+        self.red_entry.insert(0, str(int(self.current_color[0])))
+        self.green_entry.delete(0, "end")
+        self.green_entry.insert(0, str(int(self.current_color[1])))
+        self.blue_entry.delete(0, "end")
+        self.blue_entry.insert(0, str(int(self.current_color[2])))
     
-    def center_window(self):
-        """Center the window on the screen"""
-        # This method is no longer needed as we set the position in __init__
-        pass
+    def set_color(self, rgb):
+        """Set the current color and update display"""
+        self.current_color = rgb
+        
+        # Update sliders
+        self.red_slider.set(rgb[0])
+        self.green_slider.set(rgb[1])
+        self.blue_slider.set(rgb[2])
+        
+        # Update display
+        self.update_color_display()
+        
+        # Apply to selected zone
+        self.apply_color()
     
-    def pick_color(self):
-        """Open color picker dialog"""
-        color = colorchooser.askcolor(title="Choose Color")[0]
-        if color:
-            r, g, b = color
+    def on_red_change(self, value):
+        """Handle red slider change"""
+        self.current_color = (int(value), self.current_color[1], self.current_color[2])
+        self.update_color_display()
+        self.apply_color()
+    
+    def on_green_change(self, value):
+        """Handle green slider change"""
+        self.current_color = (self.current_color[0], int(value), self.current_color[2])
+        self.update_color_display()
+        self.apply_color()
+    
+    def on_blue_change(self, value):
+        """Handle blue slider change"""
+        self.current_color = (self.current_color[0], self.current_color[1], int(value))
+        self.update_color_display()
+        self.apply_color()
+    
+    def on_entry_change(self, event=None):
+        """Handle RGB entry changes"""
+        try:
+            r = max(0, min(255, int(self.red_entry.get() or 0)))
+            g = max(0, min(255, int(self.green_entry.get() or 0)))
+            b = max(0, min(255, int(self.blue_entry.get() or 0)))
+            
+            self.current_color = (r, g, b)
+            
+            # Update sliders
             self.red_slider.set(r)
             self.green_slider.set(g)
             self.blue_slider.set(b)
-            self.update_color()
-    
-    def update_color(self, *args):
-        """Update the color based on slider values"""
-        try:
-            # Get RGB values from sliders
-            r = int(self.red_slider.get())
-            g = int(self.green_slider.get())
-            b = int(self.blue_slider.get())
             
-            # Update preview
-            color_hex = f'#{r:02x}{g:02x}{b:02x}'
-            self.preview_frame.configure(fg_color=color_hex)
+            # Update display
+            self.update_color_display()
+            self.apply_color()
             
-            # Update device color
-            if self.selected_zone:
-                try:
-                    # Create RGB color
-                    color = RGBColor(r, g, b)
-                    
-                    # Apply color to selected zone
-                    self.selected_zone.set_color(color)
-                    
-                    # Store the color for this zone
-                    self.zone_colors[self.selected_zone] = (r, g, b)
-                    
-                except Exception as e:
-                    print(f"Error updating color: {e}")
-                    messagebox.showerror("Error", f"Failed to update color: {str(e)}")
-            
-        except Exception as e:
-            print(f"Error in update_color: {e}")
+        except ValueError:
+            pass  # Ignore invalid input
     
-    def update_red_value(self, value):
-        """Update red value label"""
-        self.red_value_label.configure(text=str(int(value)))
-        self.update_color()
+    def open_color_picker(self):
+        """Open system color picker"""
+        color = colorchooser.askcolor(
+            color=self.rgb_to_hex(self.current_color),
+            title="Choose Color"
+        )
+        
+        if color[0]:  # If user didn't cancel
+            rgb = tuple(int(c) for c in color[0])
+            self.set_color(rgb)
     
-    def update_green_value(self, value):
-        """Update green value label"""
-        self.green_value_label.configure(text=str(int(value)))
-        self.update_color()
-    
-    def update_blue_value(self, value):
-        """Update blue value label"""
-        self.blue_value_label.configure(text=str(int(value)))
-        self.update_color()
-    
-    def on_closing(self):
-        """Handle window closing"""
-        self.grab_release()
-        self.destroy()
+    def apply_color(self):
+        """Apply current color to selected zone"""
+        if not self.selected_zone or not self.client:
+            return
+        
+        # Throttle updates to avoid overwhelming the RGB device
+        if self.updating:
+            return
+        
+        self.updating = True
+        
+        def update_color():
+            try:
+                # Create RGBColor object
+                rgb_color = RGBColor(
+                    int(self.current_color[0]),
+                    int(self.current_color[1]),
+                    int(self.current_color[2])
+                )
+                
+                # Apply color to all LEDs in the zone
+                for i in range(len(self.selected_zone.leds)):
+                    self.selected_zone.leds[i].set_color(rgb_color)
+                
+                # Update the device
+                self.client.update_device(self.device)
+                
+            except Exception as e:
+                print(f"Error applying color: {e}")
+            finally:
+                # Allow next update after short delay
+                time.sleep(0.05)  # 50ms delay
+                self.updating = False
+        
+        # Run color update in separate thread to avoid blocking UI
+        if self.update_thread is None or not self.update_thread.is_alive():
+            self.update_thread = threading.Thread(target=update_color, daemon=True)
+            self.update_thread.start()
