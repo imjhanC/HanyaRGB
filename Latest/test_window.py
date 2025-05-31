@@ -10,7 +10,9 @@ import subprocess
 from tkinter import messagebox
 from openrgb import OpenRGBClient
 from openrgb.utils import RGBColor
-
+import tkinter.colorchooser as colorchooser
+from threading import Thread
+from color_control_window import ColorControlWindow
 # Global variables
 openrgb_server_process = None
 client = None
@@ -212,100 +214,101 @@ class RGBControlApp(ctk.CTk):
         
         # Initialize OpenRGB connection
         self.initialize_openrgb()
+        
+        # Bind resize event for responsive design
+        self.bind("<Configure>", self.on_window_resize)
     
     def create_ui(self):
         """Create the user interface"""
         # Main container
         self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        self.main_frame.pack(fill="both", expand=True, padx=30, pady=60)
         
-        # Title
+        # Title section
+        self.title_frame = ctk.CTkFrame(self.main_frame)
+        self.title_frame.pack(fill="x", padx=20, pady=(20, 20))
+        
         self.title_label = ctk.CTkLabel(
-            self.main_frame, 
+            self.title_frame, 
             text="RGB Control Panel", 
             font=("Arial", 28, "bold")
         )
-        self.title_label.pack(pady=(20, 10))
+        self.title_label.pack(pady=(10, 5))
         
-        # Status label
         self.status_label = ctk.CTkLabel(
-            self.main_frame, 
+            self.title_frame, 
             text="Initializing OpenRGB...", 
             font=("Arial", 14)
         )
-        self.status_label.pack(pady=(0, 20))
+        self.status_label.pack(pady=(0, 10))
         
-        # Device selection frame
+        # Device selection section
         self.device_frame = ctk.CTkFrame(self.main_frame)
-        self.device_frame.pack(fill="x", padx=20, pady=(0, 10))
+        self.device_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
         self.device_label = ctk.CTkLabel(
             self.device_frame, 
             text="Select Device:", 
             font=("Arial", 16, "bold")
         )
-        self.device_label.pack(pady=(10, 5))
+        self.device_label.pack(pady=(10, 10))
         
-        # Device buttons container
-        self.device_buttons_frame = ctk.CTkFrame(self.device_frame)
-        self.device_buttons_frame.pack(fill="x", padx=10, pady=(0, 10))
+        # Device buttons container with scrollable frame
+        self.device_buttons_frame = ctk.CTkScrollableFrame(self.device_frame)
+        self.device_buttons_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
-        # Zone selection frame
-        self.zone_frame = ctk.CTkFrame(self.main_frame)
-        self.zone_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
-        
-        self.zone_label = ctk.CTkLabel(
-            self.zone_frame, 
-            text="Select Zone:", 
-            font=("Arial", 16, "bold")
-        )
-        self.zone_label.pack(pady=(10, 5))
-        
-        # Zone buttons container with scrollable frame
-        self.zone_scroll_frame = ctk.CTkScrollableFrame(self.zone_frame)
-        self.zone_scroll_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        
-        # Control frame
+        # Bottom control section
         self.control_frame = ctk.CTkFrame(self.main_frame)
-        self.control_frame.pack(fill="x", padx=20, pady=(0, 20))
-        
-        # Color control buttons
-        self.color_buttons_frame = ctk.CTkFrame(self.control_frame)
-        self.color_buttons_frame.pack(fill="x", padx=10, pady=10)
-        
-        # Add color control buttons
-        colors = [
-            ("Red", "#FF0000"),
-            ("Green", "#00FF00"),
-            ("Blue", "#0000FF"),
-            ("Purple", "#FF00FF"),
-            ("Yellow", "#FFFF00"),
-            ("Cyan", "#00FFFF"),
-            ("White", "#FFFFFF"),
-            ("Off", "#000000")
-        ]
-        
-        for i, (name, color) in enumerate(colors):
-            btn = ctk.CTkButton(
-                self.color_buttons_frame,
-                text=name,
-                fg_color=color,
-                text_color="black" if color in ["#FFFF00", "#00FFFF", "#FFFFFF"] else "white",
-                command=lambda c=color: self.set_zone_color(c),
-                width=80,
-                height=35
-            )
-            btn.grid(row=0, column=i, padx=5, pady=5)
+        self.control_frame.pack(fill="x", padx=20, pady=(0, 10))
         
         # Refresh button
         self.refresh_btn = ctk.CTkButton(
             self.control_frame,
             text="Refresh Devices",
             command=self.refresh_devices,
-            width=120,
-            height=35
+            width=200,
+            height=40
         )
         self.refresh_btn.pack(pady=10)
+    
+    def on_window_resize(self, event):
+        """Handle window resize events to make buttons responsive"""
+        # Only handle resize events for the main window
+        if event.widget == self:
+            self.update_button_layout()
+    
+    def update_button_layout(self):
+        """Update button layout based on current window size"""
+        try:
+            # Get current window width
+            window_width = self.winfo_width()
+            
+            # Calculate optimal button width and columns for device buttons
+            min_button_width = 250
+            max_button_width = 400
+            button_padding = 10
+            
+            # Calculate how many columns can fit
+            available_width = window_width - 100  # Account for padding
+            cols = max(1, available_width // (min_button_width + button_padding))
+            
+            # Calculate button width
+            button_width = min(max_button_width, 
+                             (available_width - (cols * button_padding)) // cols)
+            
+            # Update device buttons layout
+            for i, widget in enumerate(self.device_buttons_frame.winfo_children()):
+                if isinstance(widget, ctk.CTkButton):
+                    widget.configure(width=button_width)
+                    widget.grid(row=i//cols, column=i%cols, padx=5, pady=5, sticky="ew")
+            
+            # Configure column weights for device buttons frame
+            for col in range(cols):
+                self.device_buttons_frame.grid_columnconfigure(col, weight=1)
+                
+        except Exception as e:
+            # Silently handle any resize errors to avoid spam
+            pass
     
     def initialize_openrgb(self):
         """Initialize OpenRGB connection"""
@@ -327,7 +330,7 @@ class RGBControlApp(ctk.CTk):
                 self.status_label.configure(text="Failed to connect to OpenRGB")
                 return
             
-            self.status_label.configure(text="Connected! Select a device and zone.")
+            self.status_label.configure(text="Connected! Select a device.")
             self.load_devices()
             
         except Exception as e:
@@ -364,99 +367,49 @@ class RGBControlApp(ctk.CTk):
                     width=300,
                     height=40
                 )
-                btn.grid(row=i//3, column=i%3, padx=5, pady=5)
+                btn.grid(row=0, column=i, padx=5, pady=5, sticky="ew")
             
             print(f"Loaded {len(devices)} devices")
+            
+            # Update button layout after loading
+            self.after(100, self.update_button_layout)
             
         except Exception as e:
             print(f"Error loading devices: {e}")
             self.status_label.configure(text=f"Error loading devices: {str(e)}")
     
     def select_device(self, device):
-        """Select a device and load its zones"""
+        """Select a device and open color control window"""
         self.selected_device = device
-        self.selected_zone = None
         
         # Update status
         self.status_label.configure(text=f"Selected device: {device.name}")
         
-        # Load zones for selected device
-        self.load_zones()
+        # Open color control window
+        self.open_color_control_window()
     
-    def load_zones(self):
-        """Load and display zones for the selected device"""
-        if not self.selected_device:
+    def open_color_control_window(self):
+        """Open the color control window"""
+        if not self.selected_device or not self.client:
             return
         
         try:
-            # Clear existing zone buttons
-            for widget in self.zone_scroll_frame.winfo_children():
-                widget.destroy()
-            
-            # Get zones
-            zones = self.selected_device.zones
-            
-            if not zones:
-                no_zone_label = ctk.CTkLabel(
-                    self.zone_scroll_frame, 
-                    text="No zones found for this device"
-                )
-                no_zone_label.pack(pady=10)
-                return
-            
-            # Create zone buttons
-            for i, zone in enumerate(zones):
-                zone_info = f"{zone.name}\n({len(zone.leds)} LEDs)"
-                btn = ctk.CTkButton(
-                    self.zone_scroll_frame,
-                    text=zone_info,
-                    command=lambda z=zone: self.select_zone(z),
-                    width=250,
-                    height=60
-                )
-                btn.grid(row=i//4, column=i%4, padx=10, pady=10)
-            
-            print(f"Loaded {len(zones)} zones for device: {self.selected_device.name}")
-            
+            from color_control_window import ColorControlWindow
+            # Hide main window
+            self.withdraw()
+            color_window = ColorControlWindow(self, self.client, self.selected_device)
+            # Show main window when color window is closed
+            color_window.protocol("WM_DELETE_WINDOW", lambda: self.on_color_window_close(color_window))
         except Exception as e:
-            print(f"Error loading zones: {e}")
-            self.status_label.configure(text=f"Error loading zones: {str(e)}")
+            print(f"Error opening color control window: {e}")
+            messagebox.showerror("Error", f"Failed to open color control window: {str(e)}")
+            # Show main window if there's an error
+            self.deiconify()
     
-    def select_zone(self, zone):
-        """Select a zone for control"""
-        self.selected_zone = zone
-        
-        # Update status
-        self.status_label.configure(
-            text=f"Selected: {self.selected_device.name} -> {zone.name} ({len(zone.leds)} LEDs)"
-        )
-    
-    def set_zone_color(self, hex_color):
-        """Set the selected zone to a specific color"""
-        if not self.selected_zone:
-            messagebox.showwarning("No Zone Selected", "Please select a zone first!")
-            return
-        
-        try:
-            # Convert hex to RGB
-            hex_color = hex_color.lstrip('#')
-            r = int(hex_color[0:2], 16)
-            g = int(hex_color[2:4], 16)
-            b = int(hex_color[4:6], 16)
-            
-            # Create color
-            color = RGBColor(r, g, b)
-            
-            # Set all LEDs in the zone to this color
-            colors = [color] * len(self.selected_zone.leds)
-            self.selected_zone.set_colors(colors)
-            
-            color_name = "Off" if hex_color == "000000" else f"RGB({r},{g},{b})"
-            print(f"Set {self.selected_zone.name} to {color_name}")
-            
-        except Exception as e:
-            print(f"Error setting zone color: {e}")
-            messagebox.showerror("Error", f"Failed to set zone color: {str(e)}")
+    def on_color_window_close(self, color_window):
+        """Handle color window closing"""
+        color_window.destroy()
+        self.deiconify()  # Show main window again
     
     def refresh_devices(self):
         """Refresh the device list"""
