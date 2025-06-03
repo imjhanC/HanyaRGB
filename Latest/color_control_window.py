@@ -332,15 +332,18 @@ class ColorControlWindow(ctk.CTkToplevel):
             print(f"Error getting zone color: {e}")
             self.current_color = (255, 255, 255)  # Default to white if error
         
-        # Show color controls when a zone is selected
+        # Reset static mode and show only the Static button
+        self.static_mode = False
         self.show_color_controls()
         
-        # Update UI with the zone's color only if in static mode
-        if self.static_mode:
-            self.update_color_display()
-            self.red_slider.set(self.current_color[0])
-            self.green_slider.set(self.current_color[1])
-            self.blue_slider.set(self.current_color[2])
+        # Hide all color control elements
+        self.preview_frame.pack_forget()
+        self.sliders_frame.pack_forget()
+        self.picker_btn.pack_forget()
+        self.led_buttons_frame.pack_forget()
+        
+        # Show only the Static button
+        self.static_btn.pack(pady=(20, 10))
     
     def rgb_to_hex(self, rgb):
         """Convert RGB tuple to hex color"""
