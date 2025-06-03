@@ -20,6 +20,7 @@ class ColorControlWindow(ctk.CTkToplevel):
         self.zone_buttons = {}  # Store zone buttons for highlighting
         self.zone_colors = {}   # Store zone colors
         self.color_picker_window = None  # Store reference to color picker window
+        self.static_mode = False  # Track static mode state
         
         # Get initial color from first zone if available
         try:
@@ -98,13 +99,30 @@ class ColorControlWindow(ctk.CTkToplevel):
         self.zone_buttons_frame = ctk.CTkScrollableFrame(self.zone_frame, height=120)
         self.zone_buttons_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # Color control frame
+        # Color control frame (initially hidden)
         self.color_frame = ctk.CTkFrame(self.main_frame)
-        self.color_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Don't pack it initially - it will be shown when Static is clicked
         
-        # Color preview
+        # Create color control elements
+        self.create_color_controls()
+    
+    def create_color_controls(self):
+        """Create the color control elements inside the color frame"""
+        # Static mode button (moved to color control frame)
+        self.static_btn = ctk.CTkButton(
+            self.color_frame,
+            text="Static",
+            command=self.toggle_static_mode,
+            width=200,
+            height=40,
+            fg_color=["#3B8ED0", "#1F6AA5"],  # Default blue color
+            hover_color=["#36719F", "#144870"]
+        )
+        self.static_btn.pack(pady=(20, 10))
+        
+        # Color preview (initially hidden)
         self.preview_frame = ctk.CTkFrame(self.color_frame)
-        self.preview_frame.pack(fill="x", padx=20, pady=(20, 10))
+        # Don't pack initially
         
         self.preview_label = ctk.CTkLabel(
             self.preview_frame,
@@ -115,19 +133,20 @@ class ColorControlWindow(ctk.CTkToplevel):
         
         self.color_preview = ctk.CTkFrame(
             self.preview_frame,
+            width=60,
             height=60,
             fg_color=self.rgb_to_hex(self.current_color)
         )
-        self.color_preview.pack(fill="x", padx=20, pady=(0, 10))
+        self.color_preview.pack(pady=(0, 10))
         
-        # RGB sliders frame
+        # RGB sliders frame (initially hidden)
         self.sliders_frame = ctk.CTkFrame(self.color_frame)
-        self.sliders_frame.pack(fill="x", padx=20, pady=10)
+        # Don't pack initially
         
         # RGB sliders with entry fields
         self.create_rgb_sliders()
         
-        # Color picker button
+        # Color picker button (initially hidden)
         self.picker_btn = ctk.CTkButton(
             self.color_frame,
             text="Open System Color Picker",
@@ -135,11 +154,45 @@ class ColorControlWindow(ctk.CTkToplevel):
             width=200,
             height=40
         )
-        self.picker_btn.pack(pady=20)
+        # Don't pack initially
         
-        # LED buttons frame (for individual LED control)
+        # LED buttons frame (for individual LED control) (initially hidden)
         self.led_buttons_frame = ctk.CTkFrame(self.color_frame)
-        self.led_buttons_frame.pack(fill="x", padx=20, pady=(0, 20))
+        # Don't pack initially
+    
+    def toggle_static_mode(self):
+        """Show color controls and hide the Static button"""
+        if not self.static_mode:
+            # Hide the Static button
+            self.static_btn.pack_forget()
+            
+            # Show all color control elements
+            self.preview_frame.pack(fill="x", padx=20, pady=(20, 10))
+            self.sliders_frame.pack(fill="x", padx=20, pady=10)
+            self.picker_btn.pack(pady=20)
+            self.led_buttons_frame.pack(fill="x", padx=20, pady=(0, 20))
+            
+            self.static_mode = True
+                
+            # Update LED buttons for selected zone
+            if self.selected_zone:
+                self.update_led_buttons()
+    
+    def show_color_controls(self):
+        """Show the color control frame with only Static button visible"""
+        if not self.color_frame.winfo_viewable():
+            self.color_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # Ensure only Static button is visible initially
+        if not self.static_btn.winfo_viewable() and not self.static_mode:
+            self.static_btn.pack(pady=(20, 10))
+        
+        # Hide color controls if static mode is not active
+        if not self.static_mode:
+            self.preview_frame.pack_forget()
+            self.sliders_frame.pack_forget()
+            self.picker_btn.pack_forget()
+            self.led_buttons_frame.pack_forget()
     
     def create_rgb_sliders(self):
         """Create RGB sliders with entry fields"""
@@ -279,13 +332,15 @@ class ColorControlWindow(ctk.CTkToplevel):
             print(f"Error getting zone color: {e}")
             self.current_color = (255, 255, 255)  # Default to white if error
         
-        # Update UI with the zone's color
-        self.update_color_display()
-        self.red_slider.set(self.current_color[0])
-        self.green_slider.set(self.current_color[1])
-        self.blue_slider.set(self.current_color[2])
-        # Update LED buttons for this zone
-        self.update_led_buttons()
+        # Show color controls when a zone is selected
+        self.show_color_controls()
+        
+        # Update UI with the zone's color only if in static mode
+        if self.static_mode:
+            self.update_color_display()
+            self.red_slider.set(self.current_color[0])
+            self.green_slider.set(self.current_color[1])
+            self.blue_slider.set(self.current_color[2])
     
     def rgb_to_hex(self, rgb):
         """Convert RGB tuple to hex color"""
@@ -428,6 +483,9 @@ class ColorControlWindow(ctk.CTkToplevel):
 
     def update_led_buttons(self):
         """Update the LED buttons for the selected zone"""
+        if not self.static_mode:
+            return
+            
         # Clear previous buttons
         for widget in self.led_buttons_frame.winfo_children():
             widget.destroy()
