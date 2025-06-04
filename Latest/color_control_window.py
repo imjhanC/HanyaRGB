@@ -24,6 +24,19 @@ class ColorControlWindow(ctk.CTkToplevel):
         self.zone_colors = {}   # Store zone colors
         self.color_picker_window = None  # Store reference to color picker window
         self.static_mode = False  # Track static mode state
+        self.zone_led_counts = {}  # Initialize zone LED counts dictionary
+        self.saved_zone_colors = {}  # Store zone colors before LED control window
+        
+        # Set all zone LEDs to white initially
+        try:
+            white_color = RGBColor(255, 255, 255)
+            for zone in device.zones:
+                if zone.leds:
+                    for led in zone.leds:
+                        led.set_color(white_color)
+            client.update_device(device)
+        except Exception as e:
+            print(f"Error setting initial white color: {e}")
         
         # Get initial color from first zone if available
         try:
@@ -31,10 +44,13 @@ class ColorControlWindow(ctk.CTkToplevel):
                 initial_color = device.zones[0].leds[0].colors[0]
                 self.current_color = (initial_color.red, initial_color.green, initial_color.blue)
             else:
-                self.current_color = (255, 0, 0)  # Default red
+                self.current_color = (255, 255, 255)  # Default white
         except Exception as e:
             print(f"Error getting initial color: {e}")
-            self.current_color = (255, 0, 0)  # Default red
+            self.current_color = (255, 255, 255)  # Default white
+        
+        # Initialize default LED counts for each zone
+        self.initialize_default_led_counts()
         
         # Window setup
         self.title(f"Color Control - {device.name}")
@@ -72,6 +88,15 @@ class ColorControlWindow(ctk.CTkToplevel):
             
         # Set up protocol handler for window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def initialize_default_led_counts(self):
+        """Initialize default LED counts for each zone"""
+        try:
+            for zone in self.device.zones:
+                # Use the actual number of LEDs in the zone as default
+                self.zone_led_counts[zone] = len(zone.leds) if zone.leds else 0
+        except Exception as e:
+            print(f"Error initializing default LED counts: {e}")
     
     def create_ui(self):
         """Create the color control interface"""
@@ -130,9 +155,13 @@ class ColorControlWindow(ctk.CTkToplevel):
     
     def create_color_controls(self):
         """Create the color control elements inside the color frame"""
-        # Static mode button (moved to color control frame)
+        # Button frame to hold Static and All Off buttons
+        button_frame = ctk.CTkFrame(self.color_frame)
+        button_frame.pack(pady=(20, 10))
+        
+        # Static mode button
         self.static_btn = ctk.CTkButton(
-            self.color_frame,
+            button_frame,
             text="Static",
             command=self.toggle_static_mode,
             width=200,
@@ -140,26 +169,19 @@ class ColorControlWindow(ctk.CTkToplevel):
             fg_color=["#3B8ED0", "#1F6AA5"],  # Default blue color
             hover_color=["#36719F", "#144870"]
         )
-        self.static_btn.pack(pady=(20, 10))
+        self.static_btn.pack(side="left", padx=(0, 10))
         
-        # Color preview (initially hidden)
-        self.preview_frame = ctk.CTkFrame(self.color_frame)
-        # Don't pack initially
-        
-        self.preview_label = ctk.CTkLabel(
-            self.preview_frame,
-            text="Current Color:",
-            font=("Arial", 14, "bold")
+        # All Off button
+        self.all_off_btn = ctk.CTkButton(
+            button_frame,
+            text="All Off",
+            command=self.turn_all_off,
+            width=200,
+            height=40,
+            fg_color=["#E74C3C", "#C0392B"],  # Red color
+            hover_color=["#C0392B", "#922B21"]
         )
-        self.preview_label.pack(pady=(10, 5))
-        
-        self.color_preview = ctk.CTkFrame(
-            self.preview_frame,
-            width=60,
-            height=60,
-            fg_color=self.rgb_to_hex(self.current_color)
-        )
-        self.color_preview.pack(pady=(0, 10))
+        self.all_off_btn.pack(side="left")
         
         # RGB sliders frame (initially hidden)
         self.sliders_frame = ctk.CTkFrame(self.color_frame)
@@ -179,7 +201,6 @@ class ColorControlWindow(ctk.CTkToplevel):
             self.static_btn.pack_forget()
             
             # Show all color control elements
-            self.preview_frame.pack(fill="x", padx=20, pady=(20, 10))
             self.sliders_frame.pack(fill="x", padx=20, pady=10)
             self.led_buttons_frame.pack(fill="x", padx=20, pady=(0, 20))
             
@@ -200,20 +221,42 @@ class ColorControlWindow(ctk.CTkToplevel):
         
         # Hide color controls if static mode is not active
         if not self.static_mode:
-            self.preview_frame.pack_forget()
             self.sliders_frame.pack_forget()
             self.led_buttons_frame.pack_forget()
     
     def create_rgb_sliders(self):
         """Create RGB sliders with entry fields"""
         slider_frame = ctk.CTkFrame(self.sliders_frame)
-        slider_frame.pack(fill="x", padx=10, pady=10)
+        slider_frame.pack(fill="x", padx=20, pady=20)
+        
+        # Color preview section
+        preview_frame = ctk.CTkFrame(slider_frame)
+        preview_frame.grid(row=0, column=0, rowspan=3, padx=(10, 20), pady=10)
+        
+        preview_label = ctk.CTkLabel(
+            preview_frame,
+            text="Current Color:",
+            font=("Arial", 14, "bold")
+        )
+        preview_label.pack(pady=(0, 5))
+        
+        self.color_preview = ctk.CTkFrame(
+            preview_frame,
+            width=60,
+            height=60,
+            fg_color=self.rgb_to_hex(self.current_color)
+        )
+        self.color_preview.pack(pady=(0, 5))
+        
+        # RGB sliders section
+        rgb_frame = ctk.CTkFrame(slider_frame)
+        rgb_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
         
         # Red slider and entry
-        self.red_label = ctk.CTkLabel(slider_frame, text="Red:", width=60)
+        self.red_label = ctk.CTkLabel(rgb_frame, text="Red:", width=60)
         self.red_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.red_slider = ctk.CTkSlider(
-            slider_frame,
+            rgb_frame,
             from_=0,
             to=255,
             number_of_steps=255,
@@ -221,16 +264,16 @@ class ColorControlWindow(ctk.CTkToplevel):
         )
         self.red_slider.set(self.current_color[0])
         self.red_slider.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
-        self.red_entry = ctk.CTkEntry(slider_frame, width=50)
+        self.red_entry = ctk.CTkEntry(rgb_frame, width=50)
         self.red_entry.grid(row=0, column=2, padx=5, pady=5)
         self.red_entry.insert(0, str(int(self.current_color[0])))
         self.red_entry.bind("<KeyRelease>", self.on_red_entry_change)
         
         # Green slider and entry
-        self.green_label = ctk.CTkLabel(slider_frame, text="Green:", width=60)
+        self.green_label = ctk.CTkLabel(rgb_frame, text="Green:", width=60)
         self.green_label.grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.green_slider = ctk.CTkSlider(
-            slider_frame,
+            rgb_frame,
             from_=0,
             to=255,
             number_of_steps=255,
@@ -238,16 +281,16 @@ class ColorControlWindow(ctk.CTkToplevel):
         )
         self.green_slider.set(self.current_color[1])
         self.green_slider.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
-        self.green_entry = ctk.CTkEntry(slider_frame, width=50)
+        self.green_entry = ctk.CTkEntry(rgb_frame, width=50)
         self.green_entry.grid(row=1, column=2, padx=5, pady=5)
         self.green_entry.insert(0, str(int(self.current_color[1])))
         self.green_entry.bind("<KeyRelease>", self.on_green_entry_change)
         
         # Blue slider and entry
-        self.blue_label = ctk.CTkLabel(slider_frame, text="Blue:", width=60)
+        self.blue_label = ctk.CTkLabel(rgb_frame, text="Blue:", width=60)
         self.blue_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.blue_slider = ctk.CTkSlider(
-            slider_frame,
+            rgb_frame,
             from_=0,
             to=255,
             number_of_steps=255,
@@ -255,13 +298,14 @@ class ColorControlWindow(ctk.CTkToplevel):
         )
         self.blue_slider.set(self.current_color[2])
         self.blue_slider.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-        self.blue_entry = ctk.CTkEntry(slider_frame, width=50)
+        self.blue_entry = ctk.CTkEntry(rgb_frame, width=50)
         self.blue_entry.grid(row=2, column=2, padx=5, pady=5)
         self.blue_entry.insert(0, str(int(self.current_color[2])))
         self.blue_entry.bind("<KeyRelease>", self.on_blue_entry_change)
         
         # Configure grid weights
         slider_frame.grid_columnconfigure(1, weight=1)
+        rgb_frame.grid_columnconfigure(1, weight=1)
     
     def load_zones(self):
         """Load zones as buttons"""
@@ -283,6 +327,9 @@ class ColorControlWindow(ctk.CTkToplevel):
             
             # Create zone buttons
             for i, zone in enumerate(zones):
+                # Get LED count for display (use configured count or default)
+                led_count = self.zone_led_counts.get(zone, len(zone.leds) if zone.leds else 0) # Problem here <----
+                
                 btn = ctk.CTkButton(
                     self.zone_buttons_frame,
                     text=f"{zone.name}",
@@ -347,7 +394,6 @@ class ColorControlWindow(ctk.CTkToplevel):
         self.show_color_controls()
         
         # Hide all color control elements
-        self.preview_frame.pack_forget()
         self.sliders_frame.pack_forget()
         self.led_buttons_frame.pack_forget()
         
@@ -439,9 +485,36 @@ class ColorControlWindow(ctk.CTkToplevel):
         # Destroy the main window
         self.destroy()
     
+    def save_zone_colors(self):
+        """Save current colors for all zones"""
+        self.saved_zone_colors.clear()
+        for zone in self.device.zones:
+            try:
+                if zone.leds:
+                    # Get the color of the first LED in the zone
+                    color = zone.leds[0].colors[0]
+                    self.saved_zone_colors[zone] = (color.red, color.green, color.blue)
+            except Exception as e:
+                print(f"Error saving color for zone {zone.name}: {e}")
+                self.saved_zone_colors[zone] = (255, 255, 255)  # Default to white if error
+
+    def restore_zone_colors(self):
+        """Restore saved colors for all zones"""
+        try:
+            for zone, color in self.saved_zone_colors.items():
+                rgb_color = RGBColor(*color)
+                for led in zone.leds:
+                    led.set_color(rgb_color)
+            self.client.update_device(self.device)
+        except Exception as e:
+            print(f"Error restoring zone colors: {e}")
+
     def open_led_control(self):
         """Open the LED control window"""
         try:
+            # Save current colors before opening LED control window
+            self.save_zone_colors()
+            
             # Get the directory of the current file
             current_dir = os.path.dirname(os.path.abspath(__file__))
             # Construct the path to led_control.py
@@ -452,7 +525,12 @@ class ColorControlWindow(ctk.CTkToplevel):
                 # Import and run the LED control window
                 sys.path.append(current_dir)
                 from led_control_window import LEDControlWindow
-                led_control = LEDControlWindow(self, self.client, self.device, self.device.zones)
+                # Pass the current LED counts to the LED control window
+                led_control = LEDControlWindow(self, self.client, self.device, self.device.zones, self.zone_led_counts)
+                # Wait for the LED control window to close
+                self.wait_window(led_control)
+                # Restore colors after LED control window is closed
+                self.restore_zone_colors()
             else:
                 print(f"Error: {led_control_path} not found")
         except Exception as e:
@@ -471,8 +549,8 @@ class ColorControlWindow(ctk.CTkToplevel):
             return
             
         # Get the current LED count for this zone
-        # Use zone_led_counts if available, otherwise use the default LED count
-        led_count = self.zone_led_counts.get(self.selected_zone, len(self.selected_zone.leds))
+        # Use configured count from zone_led_counts, or default to actual LED count
+        led_count = self.zone_led_counts.get(self.selected_zone, len(self.selected_zone.leds) if self.selected_zone.leds else 0)
         
         # Create a scrollable frame for the buttons
         buttons_scroll = ctk.CTkScrollableFrame(self.led_buttons_frame)
@@ -481,7 +559,7 @@ class ColorControlWindow(ctk.CTkToplevel):
         # Add title
         ctk.CTkLabel(
             buttons_scroll,
-            text="Individual LED Control:",
+            text=f"Individual LED Control ({led_count} LEDs):",
             font=("Arial", 14, "bold")
         ).pack(pady=(0, 5))
         
@@ -500,8 +578,12 @@ class ColorControlWindow(ctk.CTkToplevel):
             
             # Get current color of the LED
             try:
-                color = self.selected_zone.leds[i].colors[0]
-                rgb = (color.red, color.green, color.blue)
+                if i < len(self.selected_zone.leds):
+                    color = self.selected_zone.leds[i].colors[0]
+                    rgb = (color.red, color.green, color.blue)
+                else:
+                    # For virtual LEDs beyond the actual LED count
+                    rgb = (128, 128, 128)  # Gray for virtual LEDs
             except Exception:
                 rgb = (255, 255, 255)
                 
@@ -522,6 +604,11 @@ class ColorControlWindow(ctk.CTkToplevel):
 
     def pick_led_color(self, led_index):
         """Open color picker for a specific LED and set its color in real-time"""
+        # Check if the LED index is within the actual LED range
+        if led_index >= len(self.selected_zone.leds):
+            print(f"LED {led_index + 1} is beyond the actual LED count for this zone")
+            return
+            
         led = self.selected_zone.leds[led_index]
         try:
             color = led.colors[0]
@@ -614,3 +701,28 @@ class ColorControlWindow(ctk.CTkToplevel):
 
         except Exception as e:
             print(f"Error updating LED counts: {e}")
+
+    def turn_all_off(self):
+        """Turn off all LEDs in all zones"""
+        try:
+            # Create black color
+            black_color = RGBColor(0, 0, 0)
+            
+            # Apply black color to all LEDs in all zones
+            for zone in self.device.zones:
+                if zone.leds:
+                    for led in zone.leds:
+                        led.set_color(black_color)
+            
+            # Update the device
+            self.client.update_device(self.device)
+            
+            # Update current color to black
+            self.current_color = (0, 0, 0)
+            
+            # Update color display if in static mode
+            if self.static_mode:
+                self.update_color_display()
+                
+        except Exception as e:
+            print(f"Error turning off LEDs: {e}")

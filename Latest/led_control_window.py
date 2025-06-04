@@ -5,7 +5,7 @@ import threading
 import time
 
 class LEDControlWindow(ctk.CTkToplevel):
-    def __init__(self, parent, client, device, zones):
+    def __init__(self, parent, client, device, zones, initial_led_counts=None):
         super().__init__(parent)
         
         self.parent = parent
@@ -16,9 +16,12 @@ class LEDControlWindow(ctk.CTkToplevel):
         self.update_thread = None
         self.updating = False
         
-        # Initialize LED counts from zones
-        for zone in zones:
-            self.zone_led_counts[zone] = len(zone.leds)
+        # Initialize LED counts from initial_led_counts if provided, otherwise from zones
+        if initial_led_counts:
+            self.zone_led_counts = initial_led_counts.copy()
+        else:
+            for zone in zones:
+                self.zone_led_counts[zone] = len(zone.leds)
         
         # Window setup
         self.title("LED Control")
@@ -234,8 +237,12 @@ class LEDControlWindow(ctk.CTkToplevel):
         # Update parent window with new LED counts
         if hasattr(self.parent, 'update_zone_led_counts'):
             self.parent.update_zone_led_counts(self.zone_led_counts)
+        # Release the grab before closing
+        self.grab_release()
         self.destroy()
     
     def on_closing(self):
         """Handle window closing"""
+        # Release the grab before closing
+        self.grab_release()
         self.destroy()
