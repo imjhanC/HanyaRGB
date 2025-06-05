@@ -156,12 +156,12 @@ class ColorControlWindow(ctk.CTkToplevel):
     def create_color_controls(self):
         """Create the color control elements inside the color frame"""
         # Button frame to hold Static and All Off buttons
-        button_frame = ctk.CTkFrame(self.color_frame)
-        button_frame.pack(pady=(20, 10))
+        self.button_frame = ctk.CTkFrame(self.color_frame)
+        # Don't pack initially - will be shown when zone is selected
         
         # Static mode button
         self.static_btn = ctk.CTkButton(
-            button_frame,
+            self.button_frame,
             text="Static",
             command=self.toggle_static_mode,
             width=200,
@@ -173,7 +173,7 @@ class ColorControlWindow(ctk.CTkToplevel):
         
         # All Off button
         self.all_off_btn = ctk.CTkButton(
-            button_frame,
+            self.button_frame,
             text="All Off",
             command=self.turn_all_off,
             width=200,
@@ -181,7 +181,19 @@ class ColorControlWindow(ctk.CTkToplevel):
             fg_color=["#E74C3C", "#C0392B"],  # Red color
             hover_color=["#C0392B", "#922B21"]
         )
-        self.all_off_btn.pack(side="left")
+        self.all_off_btn.pack(side="left", padx=(0, 10))
+        
+        # Rainbow button
+        self.rainbow_btn = ctk.CTkButton(
+            self.button_frame,
+            text="Rainbow",
+            command=self.start_rainbow_effect,
+            width=200,
+            height=40,
+            fg_color=["#9B59B6", "#8E44AD"],  # Purple color
+            hover_color=["#8E44AD", "#6C3483"]
+        )
+        self.rainbow_btn.pack(side="left")
         
         # RGB sliders frame (initially hidden)
         self.sliders_frame = ctk.CTkFrame(self.color_frame)
@@ -197,8 +209,8 @@ class ColorControlWindow(ctk.CTkToplevel):
     def toggle_static_mode(self):
         """Show color controls and hide the Static button"""
         if not self.static_mode:
-            # Hide the Static button
-            self.static_btn.pack_forget()
+            # Hide the Static and All Off buttons
+            self.button_frame.pack_forget()
             
             # Show all color control elements
             self.sliders_frame.pack(fill="x", padx=20, pady=10)
@@ -389,16 +401,19 @@ class ColorControlWindow(ctk.CTkToplevel):
             print(f"Error getting zone color: {e}")
             self.current_color = (255, 255, 255)  # Default to white if error
         
-        # Reset static mode and show only the Static button
+        # Reset static mode
         self.static_mode = False
-        self.show_color_controls()
         
-        # Hide all color control elements
+        # Show color frame if not visible
+        if not self.color_frame.winfo_viewable():
+            self.color_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # Show Static and All Off buttons
+        self.button_frame.pack(pady=(20, 10), anchor="w", padx=20)
+        
+        # Hide color controls
         self.sliders_frame.pack_forget()
         self.led_buttons_frame.pack_forget()
-        
-        # Show only the Static button
-        self.static_btn.pack(pady=(20, 10))
     
     def rgb_to_hex(self, rgb):
         """Convert RGB tuple to hex color"""
@@ -726,3 +741,69 @@ class ColorControlWindow(ctk.CTkToplevel):
                 
         except Exception as e:
             print(f"Error turning off LEDs: {e}")
+
+    def start_rainbow_effect(self):
+        """Start a moving rainbow effect on all zones"""
+        if hasattr(self, 'rainbow_thread') and self.rainbow_thread.is_alive():
+            return  # Already running
+        
+        def rainbow_loop():
+            try:
+                position = 0
+                while getattr(self, 'rainbow_running', True):
+                    # Calculate colors for each zone based on their LED counts
+                    for zone in self.device.zones:
+                        led_count = self.zone_led_counts.get(zone, len(zone.leds) if zone.leds else 0)
+                        if led_count == 0:
+                            continue
+                        
+                        # Create colors for each LED in this zone
+                        for i in range(led_count):
+                            # Calculate hue based on position and LED index to create movement
+                            hue = ((position * 2) + (i * 360 / led_count)) % 360 / 360.0
+                            r, g, b = [int(c * 255) for c in colorsys.hsv_to_rgb(hue, 1, 1)]
+                            
+                            # Only update actual LEDs if they exist
+                            if i < len(zone.leds):
+                                zone.leds[i].set_color(RGBColor(r, g, b))
+                    
+                    # Update the device
+                    self.client.update_device(self.device)
+                    
+                    # Increment position for animation (faster movement)
+                    position = (position + 5) % 360  # Full color cycle
+                    time.sleep(0.01)  # Faster update for smoother movement
+                    
+            except Exception as e:
+                print(f"Error in rainbow effect: {e}")
+        
+        # Start the rainbow effect in a separate thread
+        self.rainbow_running = True
+        self.rainbow_thread = threading.Thread(target=rainbow_loop, daemon=True)
+        self.rainbow_thread.start()
+        
+        # Change button to "Stop Rainbow"
+        self.rainbow_btn.configure(
+            text="Stop Rainbow",
+            command=self.stop_rainbow_effect,
+            fg_color=["#E74C3C", "#C0392B"],  # Red color
+            hover_color=["#C0392B", "#922B21"]
+        )
+
+    def stop_rainbow_effect(self):
+        """Stop the rainbow effect"""
+        self.rainbow_running = False
+        if hasattr(self, 'rainbow_thread') and self.rainbow_thread.is_alive():
+            self.rainbow_thread.join(timeout=1)
+        
+        # Reset button to "Rainbow"
+        self.rainbow_btn.configure(
+            text="Rainbow",
+            command=self.start_rainbow_effect,
+            fg_color=["#9B59B6", "#8E44AD"],  # Purple color
+            hover_color=["#8E44AD", "#6C3483"]
+        )
+        
+        # Restore the zone colors that were active before rainbow
+        self.restore_zone_colors()
+        
